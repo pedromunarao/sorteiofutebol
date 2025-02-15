@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Trophy, Trash2, Loader2, ScrollText, Copy, Check } from 'lucide-react';
 import type { Player, Position, Team } from './types';
+import { useDrag, useDrop, DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 
 function App() {
   const [players, setPlayers] = useState<Player[]>(() => {
@@ -77,6 +79,28 @@ function App() {
   const isValidTeamDistribution = (team: Player[]): boolean => {
     const threeStarPlayers = team.filter(player => player.rating === 3);
     return threeStarPlayers.length <= 2;
+  };
+
+  const movePlayer = (draggedId: string, targetId: string) => {
+    const draggedPlayer = players.find(player => player.id === draggedId);
+    const targetPlayer = players.find(player => player.id === targetId);
+
+    if (draggedPlayer && targetPlayer) {
+      const draggedTeam = teams.find(team => team.players.includes(draggedPlayer));
+      const targetTeam = teams.find(team => team.players.includes(targetPlayer));
+
+      if (draggedTeam && targetTeam && draggedTeam !== targetTeam) {
+        setTeams(teams.map(team => {
+          if (team === draggedTeam) {
+            return { ...team, players: team.players.filter(player => player.id !== draggedId) };
+          } else if (team === targetTeam) {
+            return { ...team, players: [...team.players, draggedPlayer] };
+          } else {
+            return team;
+          }
+        }));
+      }
+    }
   };
 
   const generateTeams = async () => {
@@ -244,185 +268,205 @@ function App() {
     return positions[pos];
   };
 
+  const DraggablePlayer: React.FC<{ player: Player; movePlayer: (draggedId: string, targetId: string) => void }> = ({ player, movePlayer }) => {
+    const [, ref] = useDrag({
+      type: 'PLAYER',
+      item: { id: player.id },
+    });
+
+    const [, drop] = useDrop({
+      accept: 'PLAYER',
+      drop: (item: { id: string }) => movePlayer(item.id, player.id),
+    });
+
+    return (
+      <div ref={(node) => ref(drop(node))}>
+        {player.name} - {player.position} - {player.rating}
+      </div>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-8">Sorteio de Times de Futebol</h1>
+    <DndProvider backend={HTML5Backend}>
+      <div className="min-h-screen bg-gray-100 p-8">
+        <div className="max-w-6xl mx-auto">
+          <h1 className="text-3xl font-bold text-center mb-8">Sorteio de Times de Futebol</h1>
 
-        {/* Regras */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <ScrollText className="text-blue-500" size={24} />
-            <h2 className="text-xl font-semibold">Regras do Sorteio</h2>
-          </div>
-          <ul className="list-disc list-inside space-y-2 text-gray-700">
-            {rules.map((rule, index) => (
-              <li key={index}>{rule}</li>
-            ))}
-          </ul>
-        </div>
-        
-        {/* Formulário de cadastro */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Adicionar Jogador ({players.length}/24)</h2>
-          <form onSubmit={addPlayer} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Nome do jogador"
-                className="border rounded p-2"
-                required
-              />
-              <select
-                value={position}
-                onChange={(e) => setPosition(e.target.value as Position)}
-                className="border rounded p-2"
-              >
-                <option value="ZAG">Zagueiro</option>
-                <option value="ATA">Atacante</option>
-                <option value="MEIA">Meia</option>
-                <option value="ESTRELAS">Estrela</option>
-              </select>
-              <select
-                value={rating}
-                onChange={(e) => setRating(Number(e.target.value))}
-                className="border rounded p-2"
-              >
-                {[1, 2, 3].map(num => (
-                  <option key={num} value={num}>{num} estrelas</option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                className="bg-blue-500 text-white rounded p-2 flex items-center justify-center gap-2 hover:bg-blue-600"
-              >
-                <Plus size={20} /> Adicionar
-              </button>
+          {/* Regras */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <ScrollText className="text-blue-500" size={24} />
+              <h2 className="text-xl font-semibold">Regras do Sorteio</h2>
             </div>
-          </form>
-        </div>
-
-        {/* Lista de jogadores */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Jogadores ({players.length})</h2>
-            <button
-              onClick={generateTeams}
-              disabled={players.length < 6 || players.length % 6 !== 0 || isGenerating}
-              className="bg-green-500 text-white rounded p-2 flex items-center gap-2 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 size={20} className="animate-spin" />
-                  <span className="animate-pulse">Sorteando times...</span>
-                </>
-              ) : (
-                <>
-                  <Trophy size={20} />
-                  Sortear Times
-                </>
-              )}
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {players.map(player => (
-              <div key={player.id} className="border rounded p-3 flex justify-between items-center group">
-                <div>
-                  <h3 className="font-semibold">{player.name}</h3>
-                  <p className="text-sm text-gray-600">{getPositionName(player.position)}</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: player.rating }).map((_, i) => (
-                      <span key={i} className="text-yellow-400">★</span>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => deletePlayer(player.id)}
-                    className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Times sorteados */}
-        {teams.length > 0 && (
-          <>
-            <div 
-              ref={teamsRef} 
-              className={`grid grid-cols-1 md:grid-cols-2 gap-6 transition-all duration-500 ${
-                showTeams ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-              }`}
-            >
-              {teams.map((team, index) => (
-                <div 
-                  key={index} 
-                  className="bg-white rounded-lg shadow-md p-6 transition-all duration-500"
-                  style={{
-                    animationDelay: `${index * 200}ms`,
-                    animation: showTeams ? 'slideIn 0.5s ease-out forwards' : 'none'
-                  }}
-                >
-                  <h2 className="text-xl font-semibold mb-4 flex justify-between">
-                    {team.name}
-                    <span className="text-gray-600">
-                      Média: {team.averageRating} ★
-                    </span>
-                  </h2>
-                  <div className="space-y-2">
-                    {team.players.map((player, playerIndex) => (
-                      <div 
-                        key={player.id} 
-                        className="flex justify-between items-center border-b py-1 transition-all duration-300"
-                        style={{
-                          animationDelay: `${(index * 6 + playerIndex) * 100}ms`,
-                          animation: showTeams ? 'fadeIn 0.3s ease-out forwards' : 'none'
-                        }}
-                      >
-                        <div>
-                          <span className="font-medium">{player.name}</span>
-                          <span className="text-sm text-gray-600 ml-2">({getPositionName(player.position)})</span>
-                        </div>
-                        <div className="text-yellow-400">
-                          {'★'.repeat(player.rating)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            <ul className="list-disc list-inside space-y-2 text-gray-700">
+              {rules.map((rule, index) => (
+                <li key={index}>{rule}</li>
               ))}
-            </div>
+            </ul>
+          </div>
+          
+          {/* Formulário de cadastro */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 className="text-xl font-semibold mb-4">Adicionar Jogador ({players.length}/24)</h2>
+            <form onSubmit={addPlayer} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Nome do jogador"
+                  className="border rounded p-2"
+                  required
+                />
+                <select
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value as Position)}
+                  className="border rounded p-2"
+                >
+                  <option value="ZAG">Zagueiro</option>
+                  <option value="ATA">Atacante</option>
+                  <option value="MEIA">Meia</option>
+                  <option value="ESTRELAS">Estrela</option>
+                </select>
+                <select
+                  value={rating}
+                  onChange={(e) => setRating(Number(e.target.value))}
+                  className="border rounded p-2"
+                >
+                  {[1, 2, 3].map(num => (
+                    <option key={num} value={num}>{num} estrelas</option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="bg-blue-500 text-white rounded p-2 flex items-center justify-center gap-2 hover:bg-blue-600"
+                >
+                  <Plus size={20} /> Adicionar
+                </button>
+              </div>
+            </form>
+          </div>
 
-            <div className="mt-8 flex justify-center">
+          {/* Lista de jogadores */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Jogadores ({players.length})</h2>
               <button
-                onClick={copyToClipboard}
-                className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white transition-all ${
-                  copied ? 'bg-green-500' : 'bg-blue-500 hover:bg-blue-600'
-                }`}
+                onClick={generateTeams}
+                disabled={players.length < 6 || players.length % 6 !== 0 || isGenerating}
+                className="bg-green-500 text-white rounded p-2 flex items-center gap-2 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {copied ? (
+                {isGenerating ? (
                   <>
-                    <Check size={20} />
-                    Copiado!
+                    <Loader2 size={20} className="animate-spin" />
+                    <span className="animate-pulse">Sorteando times...</span>
                   </>
                 ) : (
                   <>
-                    <Copy size={20} />
-                    Copiar times para WhatsApp
+                    <Trophy size={20} />
+                    Sortear Times
                   </>
                 )}
               </button>
             </div>
-          </>
-        )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {players.map(player => (
+                <div key={player.id} className="border rounded p-3 flex justify-between items-center group">
+                  <div>
+                    <h3 className="font-semibold">{player.name}</h3>
+                    <p className="text-sm text-gray-600">{getPositionName(player.position)}</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: player.rating }).map((_, i) => (
+                        <span key={i} className="text-yellow-400">★</span>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => deletePlayer(player.id)}
+                      className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Times sorteados */}
+          {teams.length > 0 && (
+            <>
+              <div 
+                ref={teamsRef} 
+                className={`grid grid-cols-1 md:grid-cols-2 gap-6 transition-all duration-500 ${
+                  showTeams ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+                }`}
+              >
+                {teams.map((team, index) => (
+                  <div 
+                    key={index} 
+                    className="bg-white rounded-lg shadow-md p-6 transition-all duration-500"
+                    style={{
+                      animationDelay: `${index * 200}ms`,
+                      animation: showTeams ? 'slideIn 0.5s ease-out forwards' : 'none'
+                    }}
+                  >
+                    <h2 className="text-xl font-semibold mb-4 flex justify-between">
+                      {team.name}
+                      <span className="text-gray-600">
+                        Média: {team.averageRating} ★
+                      </span>
+                    </h2>
+                    <div className="space-y-2">
+                      {team.players.map((player, playerIndex) => (
+                        <div 
+                          key={player.id} 
+                          className="flex justify-between items-center border-b py-1 transition-all duration-300"
+                          style={{
+                            animationDelay: `${(index * 6 + playerIndex) * 100}ms`,
+                            animation: showTeams ? 'fadeIn 0.3s ease-out forwards' : 'none'
+                          }}
+                        >
+                          <div>
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-sm text-gray-600 ml-2">({getPositionName(player.position)})</span>
+                          </div>
+                          <div className="text-yellow-400">
+                            {'★'.repeat(player.rating)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-8 flex justify-center">
+                <button
+                  onClick={copyToClipboard}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white transition-all ${
+                    copied ? 'bg-green-500' : 'bg-blue-500 hover:bg-blue-600'
+                  }`}
+                >
+                  {copied ? (
+                    <>
+                      <Check size={20} />
+                      Copiado!
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={20} />
+                      Copiar times para WhatsApp
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </DndProvider>
   );
 }
 
