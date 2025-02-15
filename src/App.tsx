@@ -81,13 +81,13 @@ function App() {
     return threeStarPlayers.length <= 2;
   };
 
-  const movePlayer = (draggedId: string, targetId: string) => {
+  const movePlayer = (draggedId: string, targetTeamName: string | null) => {
     const draggedPlayer = players.find(player => player.id === draggedId);
-    const targetPlayer = players.find(player => player.id === targetId);
+    const targetPlayer = players.find(player => player.id === targetTeamName);
 
     if (draggedPlayer && targetPlayer) {
-      const draggedTeam = teams.find(team => team.players.includes(draggedPlayer));
-      const targetTeam = teams.find(team => team.players.includes(targetPlayer));
+      const draggedTeam = teams.find(team => team.includes(draggedPlayer));
+      const targetTeam = teams.find(team => team.includes(targetPlayer));
 
       if (draggedTeam && targetTeam && draggedTeam !== targetTeam) {
         setTeams(teams.map(team => {
@@ -141,7 +141,10 @@ function App() {
         const newTeams: Team[] = Array(numTeams).fill(null).map((_, index) => ({
           name: `Time ${index + 1}`,
           players: [],
-          averageRating: 0
+          averageRating: 0,
+          includes(draggedPlayer: Player) {
+            return this.players.includes(draggedPlayer);
+          }
         }));
 
         let validDistribution = true;
@@ -269,9 +272,17 @@ function App() {
   };
 
   const DraggablePlayer: React.FC<{ player: Player; movePlayer: (draggedId: string, targetId: string) => void }> = ({ player, movePlayer }) => {
-    const [, ref] = useDrag({
+    const [{ isDragging }, ref] = useDrag({
       type: 'PLAYER',
       item: { id: player.id },
+      end: (item, monitor) => {
+        if (!monitor.didDrop()) {
+          movePlayer(item.id, item.id); // Return player to original team if dropped outside
+        }
+      },
+      collect: (monitor) => ({
+        isDragging: !!monitor.isDragging(),
+      }),
     });
 
     const [, drop] = useDrop({
@@ -280,10 +291,74 @@ function App() {
     });
 
     return (
-      <div ref={(node) => ref(drop(node))}>
-        {player.name} - {player.position} - {player.rating}
+      <div ref={(node) => ref(drop(node))} className="draggable-player flex items-center justify-between p-2 border rounded bg-white shadow-sm" style={{ opacity: isDragging ? 0.5 : 1 }}>
+        <div>
+          <span className="font-medium">{player.name}</span> - <span className="text-gray-600">{getPositionName(player.position)}</span> - <span className="text-yellow-400">{player.rating} ★</span>
+        </div>
       </div>
     );
+  };
+
+  const DroppableTeam: React.FC<{ team: Team; movePlayer: (draggedId: string, targetTeamName: string | null) => void }> = ({ team, movePlayer }) => {
+    const [, drop] = useDrop({
+      accept: 'PLAYER',
+      drop: (item: { id: string }) => movePlayer(item.id, team.name),
+    });
+
+    return (
+      <div ref={drop} className="droppable-team bg-white rounded-lg shadow-md p-6 space-y-4">
+        <h2 className="text-xl font-semibold mb-4 flex justify-between">
+          {team.name}
+          <span className="text-gray-600">
+            Média: {team.averageRating} ★
+          </span>
+        </h2>
+        <div className="space-y-2">
+          {team.players.map((player) => (
+            <DraggablePlayer key={player.id} player={player} movePlayer={movePlayer} />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const rebalanceTeams = () => {
+    const allPlayers = teams.flatMap(team => team.players);
+    const numTeams = teams.length;
+    const playersByPosition = {
+      ZAG: shuffle([...allPlayers.filter(p => p.position === 'ZAG')]),
+      ATA: shuffle([...allPlayers.filter(p => p.position === 'ATA')]),
+      MEIA: shuffle([...allPlayers.filter(p => p.position === 'MEIA')]),
+      ESTRELAS: shuffle([...allPlayers.filter(p => p.position === 'ESTRELAS')])
+    };
+
+    const newTeams: Team[] = Array(numTeams).fill(null).map((_, index) => ({
+      name: `Time ${index + 1}`,
+      players: [],
+      averageRating: 0,
+      includes(draggedPlayer: Player) {
+        return this.players.includes(draggedPlayer);
+      }
+    }));
+
+    // Distribuir jogadores para cada time
+    let teamIndex = 0;
+    while (Object.values(playersByPosition).some(positionArray => positionArray.length > 0)) {
+      for (const position in playersByPosition) {
+        if (playersByPosition[position as keyof typeof playersByPosition].length > 0) {
+          newTeams[teamIndex].players.push(playersByPosition[position as keyof typeof playersByPosition].shift()!);
+          teamIndex = (teamIndex + 1) % numTeams;
+        }
+      }
+    }
+
+    newTeams.forEach(team => {
+      team.averageRating = Number(
+        (team.players.reduce((acc, player) => acc + player.rating, 0) / team.players.length).toFixed(2)
+      );
+    });
+
+    setTeams(newTeams);
   };
 
   return (
@@ -348,122 +423,97 @@ function App() {
           </div>
 
           {/* Lista de jogadores */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Jogadores ({players.length})</h2>
-              <button
-                onClick={generateTeams}
-                disabled={players.length < 6 || players.length % 6 !== 0 || isGenerating}
-                className="bg-green-500 text-white rounded p-2 flex items-center gap-2 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 size={20} className="animate-spin" />
-                    <span className="animate-pulse">Sorteando times...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trophy size={20} />
-                    Sortear Times
-                  </>
-                )}
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {players.map(player => (
-                <div key={player.id} className="border rounded p-3 flex justify-between items-center group">
-                  <div>
-                    <h3 className="font-semibold">{player.name}</h3>
-                    <p className="text-sm text-gray-600">{getPositionName(player.position)}</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: player.rating }).map((_, i) => (
-                        <span key={i} className="text-yellow-400">★</span>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => deletePlayer(player.id)}
-                      className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Trash2 size={20} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+<div className="bg-white rounded-lg shadow-md p-6 mb-8">
+  <div className="flex justify-between items-center mb-4">
+    <h2 className="text-xl font-semibold">Jogadores ({players.length})</h2>
+    <button
+      onClick={generateTeams}
+      disabled={players.length < 6 || players.length % 6 !== 0 || isGenerating}
+      className="bg-green-500 text-white rounded p-2 flex items-center gap-2 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {isGenerating ? (
+        <>
+          <Loader2 size={20} className="animate-spin" />
+          <span className="animate-pulse">Sorteando times...</span>
+        </>
+      ) : (
+        <>
+          <Trophy size={20} />
+          Sortear Times
+        </>
+      )}
+    </button>
+  </div>
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {players.map(player => (
+      <div key={player.id} className="border rounded p-3 flex justify-between items-center group">
+        <div>
+          <h3 className="font-semibold">{player.name}</h3>
+          <p className="text-sm text-gray-600">{getPositionName(player.position)}</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1">
+            {Array.from({ length: player.rating }).map((_, i) => (
+              <span key={i} className="text-yellow-400">★</span>
+            ))}
           </div>
+          <button
+            onClick={() => deletePlayer(player.id)}
+            className="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <Trash2 size={20} />
+          </button>
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
 
-          {/* Times sorteados */}
-          {teams.length > 0 && (
-            <>
-              <div 
-                ref={teamsRef} 
-                className={`grid grid-cols-1 md:grid-cols-2 gap-6 transition-all duration-500 ${
-                  showTeams ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-                }`}
-              >
-                {teams.map((team, index) => (
-                  <div 
-                    key={index} 
-                    className="bg-white rounded-lg shadow-md p-6 transition-all duration-500"
-                    style={{
-                      animationDelay: `${index * 200}ms`,
-                      animation: showTeams ? 'slideIn 0.5s ease-out forwards' : 'none'
-                    }}
-                  >
-                    <h2 className="text-xl font-semibold mb-4 flex justify-between">
-                      {team.name}
-                      <span className="text-gray-600">
-                        Média: {team.averageRating} ★
-                      </span>
-                    </h2>
-                    <div className="space-y-2">
-                      {team.players.map((player, playerIndex) => (
-                        <div 
-                          key={player.id} 
-                          className="flex justify-between items-center border-b py-1 transition-all duration-300"
-                          style={{
-                            animationDelay: `${(index * 6 + playerIndex) * 100}ms`,
-                            animation: showTeams ? 'fadeIn 0.3s ease-out forwards' : 'none'
-                          }}
-                        >
-                          <div>
-                            <span className="font-medium">{player.name}</span>
-                            <span className="text-sm text-gray-600 ml-2">({getPositionName(player.position)})</span>
-                          </div>
-                          <div className="text-yellow-400">
-                            {'★'.repeat(player.rating)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+{/* Times sorteados */}
+{teams.length > 0 && (
+  <>
+    <div 
+      ref={teamsRef} 
+      className={`grid grid-cols-1 md:grid-cols-2 gap-6 transition-all duration-500 ${
+        showTeams ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+      }`}
+    >
+      {teams.map((team, index) => (
+        <DroppableTeam key={index} team={team} movePlayer={movePlayer} />
+      ))}
+    </div>
 
-              <div className="mt-8 flex justify-center">
-                <button
-                  onClick={copyToClipboard}
-                  className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white transition-all ${
-                    copied ? 'bg-green-500' : 'bg-blue-500 hover:bg-blue-600'
-                  }`}
-                >
-                  {copied ? (
-                    <>
-                      <Check size={20} />
-                      Copiado!
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={20} />
-                      Copiar times para WhatsApp
-                    </>
-                  )}
-                </button>
-              </div>
-            </>
-          )}
+    <div className="mt-8 flex justify-center gap-4">
+      <button
+        onClick={copyToClipboard}
+        className={`flex items-center gap-2 px-6 py-3 rounded-lg text-white transition-all ${
+          copied ? 'bg-green-500' : 'bg-blue-500 hover:bg-blue-600'
+        }`}
+      >
+        {copied ? (
+          <>
+            <Check size={20} />
+            Copiado!
+          </>
+        ) : (
+          <>
+            <Copy size={20} />
+            Copiar times para WhatsApp
+          </>
+        )}
+      </button>
+      
+      <button
+        onClick={rebalanceTeams}
+        className="bg-yellow-500 text-white rounded p-2 flex items-center gap-2 hover:bg-yellow-600"
+      >
+        <Plus size={20} />
+        Rebalancear Times
+      </button>
+    </div>
+  </>
+)}
+
         </div>
       </div>
     </DndProvider>

@@ -8,6 +8,7 @@ export interface Player {
 }
 
 export interface Team {
+  includes(draggedPlayer: Player): unknown;
   name: string;
   players: Player[];
   averageRating: number;
