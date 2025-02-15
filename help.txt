@@ -1,0 +1,2 @@
+npm install - instalar dep
+npm run dev - iniciar
